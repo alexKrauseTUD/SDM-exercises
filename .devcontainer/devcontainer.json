@@ -1,8 +1,6 @@
 {
   "name": "SDM Dev Container",
-  "build": {
-    "dockerfile": "Dockerfile"
-  },
+  "image": "jpietrzyktud/sdm:latest",
   "runArgs": ["--privileged"],
   "remoteUser": "root",
   "postCreateCommand": "echo 'Setup Complete.'",
