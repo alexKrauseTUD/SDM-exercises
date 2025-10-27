@@ -1,5 +1,9 @@
 {
   "name": "SDM Dev Container",
+  // ==  In case your OS is not supported use the build key and NOT image ==
+  // "build": {
+  //   "dockerfile": "Dockerfile"
+  // },
   "image": "jpietrzyktud/sdm:latest",
   "runArgs": ["--privileged"],
   "remoteUser": "root",
