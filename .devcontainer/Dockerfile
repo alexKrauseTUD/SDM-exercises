@@ -1,9 +1,7 @@
-# The official PostgreSQL image supports native linux/amd64 and linux/arm64.
-# Pin the Debian release to keep the development toolchain predictable.
+# Native linux/amd64 and linux/arm64 (including Docker Desktop on Apple Silicon).
 FROM postgres:18-bookworm
 
 EXPOSE 5432 8888
-
 ENV LANG=en_US.UTF-8 \
     LC_ALL=C.UTF-8
 ARG TIMEZONE=UTC
@@ -23,29 +21,33 @@ RUN set -eux; \
     update-locale LANG=en_US.UTF-8; \
     rm -rf /var/lib/apt/lists/*
 
-# Download architecture-independent teaching data.
-# The teaching server currently needs --insecure (as in the original image);
-# avoid reusing this setting for other downloads.
-RUN set -eux; \
+# The original TU Dresden Nextcloud links now return 404.
+# A working dataset is OPTIONAL at build time, but is required for IMDb exercises.
+# Provide all three URLs together using --build-arg when new URLs are available.
+ARG IMDB_CSV_URL=""
+ARG IMDB_CREATE_SQL_URL=""
+ARG IMDB_IMPORT_SQL_URL=""
+RUN set -eu; \
     mkdir -p /exercise/imdb; \
-    curl --fail --insecure --location --retry 3 \
-        -o /exercise/imdb/csv.zip \
-        "https://db4701.inf.tu-dresden.de:8443/index.php/s/H7TKaEBr5JmdaNA/download/csv.zip"; \
-    curl --fail --insecure --location --retry 3 \
-        -o /exercise/imdb/create.sql \
-        "https://db4701.inf.tu-dresden.de:8443/index.php/s/e35mDHTCZx88y6p/download/create.sql"; \
-    curl --fail --insecure --location --retry 3 \
-        -o /exercise/imdb/import.sql \
-        "https://db4701.inf.tu-dresden.de:8443/index.php/s/bNzMwSpmQESRz6P/download/import.sql"; \
-    cd /exercise/imdb; \
-    unzip -q csv.zip; \
-    rm csv.zip
+    if [ -z "$IMDB_CSV_URL" ] && [ -z "$IMDB_CREATE_SQL_URL" ] && [ -z "$IMDB_IMPORT_SQL_URL" ]; then \
+        echo >&2 "NOTICE: IMDb dataset not configured; building without IMDb tables/data."; \
+    elif [ -n "$IMDB_CSV_URL" ] && [ -n "$IMDB_CREATE_SQL_URL" ] && [ -n "$IMDB_IMPORT_SQL_URL" ]; then \
+        curl --fail --show-error --silent --location --retry 3 -o /exercise/imdb/csv.zip "$IMDB_CSV_URL"; \
+        curl --fail --show-error --silent --location --retry 3 -o /exercise/imdb/create.sql "$IMDB_CREATE_SQL_URL"; \
+        curl --fail --show-error --silent --location --retry 3 -o /exercise/imdb/import.sql "$IMDB_IMPORT_SQL_URL"; \
+        cd /exercise/imdb; \
+        unzip -tq csv.zip; \
+        unzip -q csv.zip; \
+        rm csv.zip; \
+    else \
+        echo >&2 "ERROR: Set all three IMDb build args or none of them."; \
+        exit 1; \
+    fi
 
-# Let PostgreSQL's official entrypoint initialize its PG18 data directory
-# (/var/lib/postgresql/18/docker) in a persistent /var/lib/postgresql volume.
-# Init scripts execute once, only when the database volume is empty.
+# PostgreSQL 18's upstream entrypoint initializes /var/lib/postgresql/18/docker
+# in its declared /var/lib/postgresql volume and executes this hook once.
 COPY .devcontainer/init-imdb.sh /docker-entrypoint-initdb.d/10-imdb.sh
 RUN chmod 0755 /docker-entrypoint-initdb.d/10-imdb.sh
 
 WORKDIR /exercise
-# Preserve the upstream ENTRYPOINT and CMD (docker-entrypoint.sh postgres).
+# Keep docker-entrypoint.sh and the upstream CMD (postgres).
