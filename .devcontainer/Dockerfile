@@ -1,70 +1,64 @@
-# Pin the major version if you can
-FROM postgres:18
+# Native linux/amd64 and linux/arm64 (including Docker Desktop on Apple Silicon).
+FROM postgres:18-bookworm
 
 EXPOSE 5432 8888
-STOPSIGNAL SIGINT
-
-ENV LANG=en_US.UTF-8
-ENV LC_ALL=C.UTF-8
+ENV LANG=en_US.UTF-8 \
+    LC_ALL=C.UTF-8
 ARG TIMEZONE=UTC
-ENV TZ=$TIMEZONE
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+ENV TZ=${TIMEZONE}
 
-# Install dependencies (root)
-RUN apt update && apt install -y \
-    build-essential sudo locales tzdata procps lsof wget \
-    bison flex curl pkg-config cmake llvm clang \
-    libicu-dev libreadline-dev libssl-dev liblz4-dev libossp-uuid-dev libzstd-dev zlib1g-dev \
-    git vim unzip zstd default-jre tmux \
-    python3 python3-venv python3-pip && \
-    locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8 && \
-    rm -rf /var/lib/apt/lists/* && apt clean
+RUN set -eux; \
+    ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime; \
+    echo "${TZ}" > /etc/timezone; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        build-essential sudo locales tzdata procps lsof wget \
+        bison flex curl pkg-config cmake llvm clang \
+        libicu-dev libreadline-dev libssl-dev liblz4-dev libossp-uuid-dev \
+        libzstd-dev zlib1g-dev git vim unzip zstd default-jre tmux \
+        python3 python3-venv python3-pip; \
+    locale-gen en_US.UTF-8; \
+    update-locale LANG=en_US.UTF-8; \
+    rm -rf /var/lib/apt/lists/*
 
-# Fetch your data & SQL (root)
-RUN mkdir -p /exercise/imdb \
-    && curl -k -L -o /exercise/imdb/csv.zip     "https://db4701.inf.tu-dresden.de:8443/index.php/s/H7TKaEBr5JmdaNA/download/csv.zip" \
-    && curl -k -L -o /exercise/imdb/create.sql  "https://db4701.inf.tu-dresden.de:8443/index.php/s/e35mDHTCZx88y6p/download/create.sql" \
-    && curl -k -L -o /exercise/imdb/import.sql  "https://db4701.inf.tu-dresden.de:8443/index.php/s/bNzMwSpmQESRz6P/download/import.sql" \
-    && cd /exercise/imdb && unzip csv.zip && rm csv.zip
+# Nextcloud share URLs supplied by the course maintainer on 2026-11-09.
+# Unlike the original link, the schema is distributed as sql.zip, not create.sql.
+# These public URLs may be overridden with build args.
+ARG IMDB_SQL_ZIP_URL="https://db4701.inf.tu-dresden.de:8443/index.php/s/DiaLzNWdprMKHBW/download"
+ARG IMDB_CSV_URL="https://db4701.inf.tu-dresden.de:8443/index.php/s/5yRYGz9G5QoHfQ3/download"
+ARG IMDB_IMPORT_SQL_URL="https://db4701.inf.tu-dresden.de:8443/index.php/s/RBWoAiHG5t9Nnn2/download"
 
-# Use a subdir for the cluster to keep the top-level volume clean
-ENV PGDATA=/var/lib/postgresql/data/pgdata
-ENV PGLOGCONF="${PGDATA}/postgresql.conf"
-ENV PGLOGDIR=/var/log/postgresql
-# Prepare dirs and ownership (root)
-RUN mkdir -p /var/lib/postgresql /var/run/postgresql "$PGDATA" \
-    && chown -R postgres:postgres /var/lib/postgresql /var/run/postgresql \
-    && mkdir -p "$PGLOGDIR" && chown -R postgres:postgres "$PGLOGDIR" \
-    && chmod 700 "$PGDATA"
+# The teaching Nextcloud server previously required --insecure.
+# The option is limited to these three course-host downloads.
+RUN set -eu; \
+    mkdir -p /exercise/imdb /tmp/imdb-sql; \
+    curl --fail --insecure --show-error --silent --location --retry 3 \
+        -o /tmp/sql.zip "$IMDB_SQL_ZIP_URL"; \
+    curl --fail --insecure --show-error --silent --location --retry 3 \
+        -o /exercise/imdb/csv.zip "$IMDB_CSV_URL"; \
+    curl --fail --insecure --show-error --silent --location --retry 3 \
+        -o /exercise/imdb/import.sql "$IMDB_IMPORT_SQL_URL"; \
+    unzip -tq /tmp/sql.zip; \
+    unzip -q /tmp/sql.zip -d /tmp/imdb-sql; \
+    schema="$(find /tmp/imdb-sql -type f -name create.sql -print -quit)"; \
+    if [ -z "$schema" ]; then \
+        echo >&2 "ERROR: sql.zip does not contain create.sql. Check archive contents and update the initialization workflow."; \
+        find /tmp/imdb-sql -type f -print >&2; \
+        exit 1; \
+    fi; \
+    cp "$schema" /exercise/imdb/create.sql; \
+    cd /exercise/imdb; \
+    unzip -tq csv.zip; \
+    unzip -q csv.zip; \
+    rm csv.zip; \
+    rm -rf /tmp/imdb-sql /tmp/sql.zip; \
+    test -s /exercise/imdb/create.sql; \
+    test -s /exercise/imdb/import.sql
 
-# Initialize and load DB as the postgres OS user
-USER postgres
-RUN initdb -D "$PGDATA" \
- && { \
-      echo "logging_collector = on"; \
-      echo "log_destination = 'csvlog'"; \
-      echo "log_directory = '$PGLOGDIR'"; \
-      echo "log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'"; \
-      echo "log_rotation_age = 1d"; \
-      echo "log_rotation_size = 0"; \
-    } >> "$PGDATA/postgresql.conf" \
- && pg_ctl -D "$PGDATA" -o "-c listen_addresses=''" -w start \
- && psql -v ON_ERROR_STOP=1 -U postgres -d postgres -c "CREATE USER sdm_student;" \
- && psql -v ON_ERROR_STOP=1 -U postgres -d postgres -c "CREATE DATABASE imdb OWNER sdm_student TEMPLATE template0 ENCODING 'UTF8';" \
- && psql -v ON_ERROR_STOP=1 -U postgres -d imdb -f /exercise/imdb/create.sql \
- && (cd /exercise/imdb && psql -v ON_ERROR_STOP=1 -U postgres -d imdb -f import.sql) \
- && pg_ctl -D "$PGDATA" -m fast -w stop
+# PostgreSQL 18's upstream entrypoint initializes /var/lib/postgresql/18/docker
+# in its declared /var/lib/postgresql volume and executes this hook once.
+COPY .devcontainer/init-imdb.sh /docker-entrypoint-initdb.d/10-imdb.sh
+RUN chmod 0755 /docker-entrypoint-initdb.d/10-imdb.sh
 
-# Final container config
-USER root
 WORKDIR /exercise
-VOLUME /exercise
-
-# If you want the DB to start automatically, keep the default entrypoint/cmd.
-# Your previous line replaced it with a shell; choose ONE of the following:
-# Option 1: run an interactive shell (you must start postgres yourself)
-USER postgres
-ENTRYPOINT ["/bin/bash"]
-
-# Option 2 (recommended for a DB container): use the default entrypoint and start the server
-# CMD ["postgres"]
+# Keep docker-entrypoint.sh and the upstream CMD (postgres).
