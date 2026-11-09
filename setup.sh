@@ -1,6 +1,7 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-#docker build -t sdmcontainer --build-arg TIMEZONE=$(cat /etc/timezone) ./.devcontainer
-
-docker pull jpietrzyktud/sdm:latest
-docker tag jpietrzyktud/sdm:latest sdmcontainer:latest
+# Native build: amd64 on Intel/Linux, arm64 on Apple Silicon.
+# Run from any directory; the Docker build context must be the repository root.
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+docker build -t sdmcontainer:latest -f "$repo_dir/.devcontainer/Dockerfile" "$repo_dir"
