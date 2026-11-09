@@ -3,29 +3,32 @@
 The image can build natively as **linux/arm64** (Apple Silicon) or
 **linux/amd64** (Intel/AMD Linux). Docker Desktop on macOS runs Linux containers.
 
-## Important: IMDb dataset currently unavailable
+## IMDb dataset downloads
 
-The original `db4701.inf.tu-dresden.de:8443` Nextcloud `csv.zip` URL
-returns HTTP 404 (reported November 9, 2026). This is independent of CPU
-architecture. **The default image builds and starts without IMDb tables or
-records**, but it is not sufficient for exercises that query IMDb.
+As of November 9, 2026, the course maintainer supplied three replacement
+Nextcloud links. These links are now the Dockerfile defaults:
 
-When valid URLs are available for the three matching teaching files (the
-CSV ZIP, `create.sql`, and `import.sql`), build from the repository root:
+- `sql.zip`: `https://db4701.inf.tu-dresden.de:8443/index.php/s/DiaLzNWdprMKHBW`
+- `csv.zip`: `https://db4701.inf.tu-dresden.de:8443/index.php/s/5yRYGz9G5QoHfQ3`
+- `import.sql`: `https://db4701.inf.tu-dresden.de:8443/index.php/s/RBWoAiHG5t9Nnn2`
+
+The build appends `/download` to the Nextcloud share paths, downloads the
+archives and SQL importer, extracts the CSV data, and expects `sql.zip` to
+contain a file named `create.sql`. If that assumption is wrong or a URL
+fails, the build fails explicitly instead of building an empty teaching DB.
+The source server cannot be reached from the authoring environment, so these
+downloads and the archive contents still need native-host validation.
 
 ```sh
-docker build -t sdmcontainer:latest -f .devcontainer/Dockerfile \
-  --build-arg IMDB_CSV_URL='https://example.edu/path/csv.zip' \
-  --build-arg IMDB_CREATE_SQL_URL='https://example.edu/path/create.sql' \
-  --build-arg IMDB_IMPORT_SQL_URL='https://example.edu/path/import.sql' .
+./setup.sh
+./run.sh
 ```
 
-These are **placeholders**, not replacement downloads. All three arguments
-must be supplied together; failed downloads stop the build rather than
-silently producing partial data. Use HTTPS URLs with trusted certificates.
-Do not assume IMDb's official TSV files are compatible with the original
-teaching schema and CSV importer. Ensure you have the right to use and
-redistribute any dataset.
+With a fresh database volume, the upstream entrypoint creates the IMDb
+database and imports the dataset on first startup. The server previously
+required `curl --insecure`; the Dockerfile currently restricts this
+workaround to the teaching-host downloads, but proper server TLS and archive
+hash verification are preferred.
 
 ## VS Code
 
@@ -52,10 +55,8 @@ persisted in the `sdm-postgres-data` named volume.
 PostgreSQL 18's data directory is `/var/lib/postgresql/18/docker`, inside the
 `/var/lib/postgresql` volume. At first start on an **empty volume**, the
 official entrypoint initializes PostgreSQL, creates the `sdm_student` role
-and the `imdb` database, and imports exercise data **if supplied**. Without
-data, it prints a warning and creates an empty `imdb` database. Restarting
-uses the existing volume, so later supplying a dataset does not automatically
-trigger an import.
+and the `imdb` database, and imports the downloaded exercise data.
+Restarting uses the existing volume and does not re-import the dataset.
 
 Only after ensuring there is no data to preserve, stop the container and
 reset the standalone named volume with:
