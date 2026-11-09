@@ -1,13 +1,15 @@
 {
   "name": "SDM Dev Container",
-  // ==  In case your OS is not supported use the build key and NOT image ==
-  // "build": {
-  //   "dockerfile": "Dockerfile"
-  // },
-  "image": "jpietrzyktud/sdm:latest",
-  "runArgs": ["--privileged"],
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "overrideCommand": false,
   "remoteUser": "root",
-  "postCreateCommand": "echo 'Setup Complete.'",
+  "containerEnv": {
+    "POSTGRES_PASSWORD": "sdm-local-development-only"
+  },
+  "forwardPorts": [5432],
   "customizations": {
     "vscode": {
       "extensions": [
@@ -19,7 +21,5 @@
         "ms-ossdata.vscode-pgsql"
       ]
     }
-  },
-  "postAttachCommand": "su postgres --command \"pg_ctl -D $PGDATA -w start\""
+  }
 }
-
