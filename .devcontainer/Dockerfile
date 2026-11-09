@@ -21,28 +21,39 @@ RUN set -eux; \
     update-locale LANG=en_US.UTF-8; \
     rm -rf /var/lib/apt/lists/*
 
-# The original TU Dresden Nextcloud links now return 404.
-# A working dataset is OPTIONAL at build time, but is required for IMDb exercises.
-# Provide all three URLs together using --build-arg when new URLs are available.
-ARG IMDB_CSV_URL=""
-ARG IMDB_CREATE_SQL_URL=""
-ARG IMDB_IMPORT_SQL_URL=""
+# Nextcloud share URLs supplied by the course maintainer on 2026-11-09.
+# Unlike the original link, the schema is distributed as sql.zip, not create.sql.
+# These public URLs may be overridden with build args.
+ARG IMDB_SQL_ZIP_URL="https://db4701.inf.tu-dresden.de:8443/index.php/s/DiaLzNWdprMKHBW/download"
+ARG IMDB_CSV_URL="https://db4701.inf.tu-dresden.de:8443/index.php/s/5yRYGz9G5QoHfQ3/download"
+ARG IMDB_IMPORT_SQL_URL="https://db4701.inf.tu-dresden.de:8443/index.php/s/RBWoAiHG5t9Nnn2/download"
+
+# The teaching Nextcloud server previously required --insecure.
+# The option is limited to these three course-host downloads.
 RUN set -eu; \
-    mkdir -p /exercise/imdb; \
-    if [ -z "$IMDB_CSV_URL" ] && [ -z "$IMDB_CREATE_SQL_URL" ] && [ -z "$IMDB_IMPORT_SQL_URL" ]; then \
-        echo >&2 "NOTICE: IMDb dataset not configured; building without IMDb tables/data."; \
-    elif [ -n "$IMDB_CSV_URL" ] && [ -n "$IMDB_CREATE_SQL_URL" ] && [ -n "$IMDB_IMPORT_SQL_URL" ]; then \
-        curl --fail --show-error --silent --location --retry 3 -o /exercise/imdb/csv.zip "$IMDB_CSV_URL"; \
-        curl --fail --show-error --silent --location --retry 3 -o /exercise/imdb/create.sql "$IMDB_CREATE_SQL_URL"; \
-        curl --fail --show-error --silent --location --retry 3 -o /exercise/imdb/import.sql "$IMDB_IMPORT_SQL_URL"; \
-        cd /exercise/imdb; \
-        unzip -tq csv.zip; \
-        unzip -q csv.zip; \
-        rm csv.zip; \
-    else \
-        echo >&2 "ERROR: Set all three IMDb build args or none of them."; \
+    mkdir -p /exercise/imdb /tmp/imdb-sql; \
+    curl --fail --insecure --show-error --silent --location --retry 3 \
+        -o /tmp/sql.zip "$IMDB_SQL_ZIP_URL"; \
+    curl --fail --insecure --show-error --silent --location --retry 3 \
+        -o /exercise/imdb/csv.zip "$IMDB_CSV_URL"; \
+    curl --fail --insecure --show-error --silent --location --retry 3 \
+        -o /exercise/imdb/import.sql "$IMDB_IMPORT_SQL_URL"; \
+    unzip -tq /tmp/sql.zip; \
+    unzip -q /tmp/sql.zip -d /tmp/imdb-sql; \
+    schema="$(find /tmp/imdb-sql -type f -name create.sql -print -quit)"; \
+    if [ -z "$schema" ]; then \
+        echo >&2 "ERROR: sql.zip does not contain create.sql. Check archive contents and update the initialization workflow."; \
+        find /tmp/imdb-sql -type f -print >&2; \
         exit 1; \
-    fi
+    fi; \
+    cp "$schema" /exercise/imdb/create.sql; \
+    cd /exercise/imdb; \
+    unzip -tq csv.zip; \
+    unzip -q csv.zip; \
+    rm csv.zip; \
+    rm -rf /tmp/imdb-sql /tmp/sql.zip; \
+    test -s /exercise/imdb/create.sql; \
+    test -s /exercise/imdb/import.sql
 
 # PostgreSQL 18's upstream entrypoint initializes /var/lib/postgresql/18/docker
 # in its declared /var/lib/postgresql volume and executes this hook once.
